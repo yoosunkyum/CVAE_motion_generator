@@ -10,8 +10,8 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     # scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma=0.9999)
 
-    # motion = np.load("motion/motion_example.npz","rb")
-    motion = np.load("motion/g1_boxing.npz","rb")
+    motion = np.load("motion/motion_example.npz","rb")
+    # motion = np.load("motion/g1_boxing.npz","rb")
     s_t = torch.cat([torch.Tensor(motion["dof_positions"]),
                      torch.Tensor(motion["dof_velocities"]),
                      torch.flatten(torch.Tensor(motion["body_positions"][:,0,:]), 1),
