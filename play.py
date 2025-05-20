@@ -29,31 +29,47 @@ def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_di
                 s_curr = decoder(z, s_prev)
 
             s_curr_np = s_curr[0].cpu().numpy()
-            body_pos = s_curr_np[38:(38+3)]
-            body_quat = s_curr_np[(38 + 3):(38 + 3 + 4)]
+            
+            #H1
+            # body_pos = s_curr_np[38:(38+3)]
+            # body_quat = s_curr_np[(38 + 3):(38 + 3 + 4)]
+
+            # d.qpos[:3] = body_pos
+            # d.qpos[3:7] = body_quat
+            # d.qpos[7:] = s_curr_np[0:19]
+            
+            # d.qvel[:3] = s_curr_np[(38 + (3+4)):(38 + (3+4) + 3)]
+            # d.qvel[3:6] = s_curr_np[(38 + (3+4) + 3):(38 + (3+4) + 6)]
+            # d.qvel[6:] = s_curr_np[19:38]
+            
+            #G1
+            body_pos = s_curr_np[58:(58+3)]
+            body_quat = s_curr_np[(58 + 3):(58 + 3 + 4)]
 
             d.qpos[:3] = body_pos
             d.qpos[3:7] = body_quat
-            d.qpos[7:] = s_curr_np[0:19]
+            d.qpos[7:] = s_curr_np[0:29]
             
-            d.qvel[:3] = s_curr_np[(38 + (3+4)):(38 + (3+4) + 3)]
-            d.qvel[3:6] = s_curr_np[(38 + (3+4) + 3):(38 + (3+4) + 6)]
-            d.qvel[6:] = s_curr_np[19:38]
+            d.qvel[:3] = s_curr_np[(58 + (3+4)):(58 + (3+4) + 3)]
+            d.qvel[3:6] = s_curr_np[(58 + (3+4) + 3):(58 + (3+4) + 6)]
+            d.qvel[6:] = s_curr_np[29:58]
 
             mujoco.mj_step(m, d)
             v.sync()
 
             s_prev = s_curr
-            time.sleep(0.1)
+            time.sleep(1/30)
             
 
         print("시각화 완료. ESC로 종료.")
 
 if __name__ == "__main__":
     model_path = "output/cvae_model.pth"
-    xml_path = "assets/h1.xml"
+    # xml_path = "assets/h1/h1.xml"
+    xml_path = "assets/g1/g1_29dof_rev_1_0.xml"
 
-    motion = np.load("motion/motion_example.npz","rb")
+    # motion = np.load("motion/motion_example.npz","rb")
+    motion = np.load("motion/g1_boxing.npz","rb")
     s_t = torch.cat([torch.Tensor(motion["dof_positions"]),
                      torch.Tensor(motion["dof_velocities"]),
                      torch.flatten(torch.Tensor(motion["body_positions"][:,0,:]), 1),
