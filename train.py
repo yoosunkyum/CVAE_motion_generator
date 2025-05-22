@@ -2,22 +2,35 @@ from cfg import *
 from model.cVAE import *
 import numpy as np
 import torch.optim as optim
+from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from utils import *
 
-if __name__ == "__main__":
+import argparse, sys
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--file', help=' : .npz file names in motion/ (ignore typing .npz)')
+args = parser.parse_args()
+
+def main(argv, args):
+    global learning_rate
     # ========= 학습 루프 =========
     model = cVAE(input_dim, cond_dim, hidden_dims, latent_dim)
     # optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     optimizer = optim.RAdam(model.parameters(), lr=learning_rate)
 
-    # motion = np.load("motion/motion_example.npz","rb")
-    motion = np.load("motion/g1_boxing.npz","rb")
+    FILENAME=args.file
+    # motion = np.load("motion/motion_example.npz","rb")    
+    motion = np.load(f"motion/{FILENAME}.npz","rb")
     s_t = torch.cat([torch.Tensor(motion["dof_positions"]),
                      torch.Tensor(motion["dof_velocities"]),
                      torch.flatten(torch.Tensor(motion["body_positions"][:,0,:]), 1),
-                     torch.flatten(torch.Tensor(motion["body_rotations"][:,0,:]), 1),
+                    #  torch.flatten(torch.Tensor(motion["body_rotations"][:,0,:]), 1),
+                     quat2rot6d(torch.Tensor(motion["body_rotations"][:,0,:])), # includes conversion from quat to rot6d for continuity
                      torch.flatten(torch.Tensor(motion["body_linear_velocities"][:,0,:]), 1),
                      torch.flatten(torch.Tensor(motion["body_angular_velocities"][:,0,:]), 1)], dim=1)
+    
+    #try reverse motion concatenation
+    # s_t = torch.cat([s_t,s_t.flip(0)],dim=0)
     
     s_t_1_data = torch.zeros_like(s_t)
     s_t_1_data[0,:] = s_t[0,:]
@@ -26,7 +39,8 @@ if __name__ == "__main__":
 
     dataset = torch.utils.data.TensorDataset(s_t, s_t_1_data, s_t_1_pred)
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
+    # dataset = RandomStartSequenceDataset(s_t,s_t_1_data,s_t_1_pred,batch_size=batch_size)
+    # loader = torch.utils.data.DataLoader(dataset, batch_size=None)
     for epoch in range(num_epochs):
         total_loss = 0
         recon_loss = 0
@@ -42,29 +56,28 @@ if __name__ == "__main__":
         for param_group in optimizer.param_groups:
             param_group['lr'] = learning_rate
         scheduled_beta = beta_scheduler(beta, epoch, num_epochs/5)
-
-        for x, y, z in loader:
+        
+        for x, y, z, start in loader:
             optimizer.zero_grad()          
             s_t_1 = torch.zeros_like(x)
 
             rand = torch.rand(1)
             if rand < p:
-                # print("select dataset")
-                s_t_1 = y
+                s_t_1 = y # select dataset
             else:
-                # print("select prediction")
-                s_t_1 = z
+                s_t_1 = z  # select prediction
 
             s_t_pred, mu, logvar = model(x, s_t_1)
             # loss , recon_loss_1, kl_div_1= vae_loss(s_t_pred, x, mu, logvar, beta)            
             loss , recon_loss_1, kl_div_1 = vae_loss(s_t_pred, x, mu, logvar, scheduled_beta)
-            # print("loss : ",loss.item())
             loss.backward()
             optimizer.step()
             
             total_loss += loss.item()
             recon_loss += recon_loss_1.item()
             kl_div += kl_div_1.item()
+            
+            # s_t_1_pred[start:start+batch_size] = s_t_pred
             
             s_t_1_temp.append(s_t_pred)
 
@@ -84,9 +97,9 @@ if __name__ == "__main__":
             print(f"Epoch : {epoch+1}/{num_epochs}, Total Loss: {total_loss:.4f}, Recon Loss : {recon_loss:.4f},  KL divergence :  {kl_div:.4f}, learning rate : {learning_rate:.4f}, beta : {scheduled_beta:.4f}")
 
     # 학습 루프 끝에 모델 저장 추가
-    folder_path = get_unique_folder_name("output/g1_boxing")
+    folder_path = get_unique_folder_name(f"output/{FILENAME}")
     os.makedirs(folder_path)
-    model_path = f"{folder_path}/cvae_model.pth"
+    model_path = f"{folder_path}/cvae_model.pt"
 
     # 모델 저장
     torch.save({
@@ -106,3 +119,7 @@ if __name__ == "__main__":
     
 
     print(f"모델이 '{model_path}'에 저장되었습니다.")
+    
+if __name__ == "__main__":
+    argv = sys.argv
+    main(argv, args)
