@@ -1,10 +1,8 @@
-import mujoco
-from mujoco import viewer
-import numpy as np
-import torch
 from cfg import *
-from model.cVAE import * 
-import time
+from model.cVAE import *
+import numpy as np
+import torch.optim as optim
+from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from utils import *
 
 import argparse, sys
@@ -13,97 +11,114 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--file', help=' : .npz file names in motion/ (ignore typing .npz)')
 args = parser.parse_args()
 
-
-def load_trained_decoder(model_path, input_dim, cond_dim, hidden_dims, latent_dim):
-    # decoder = Decoder(output_dim=input_dim, cond_dim=cond_dim, hidden_dims=hidden_dims[::-1], latent_dim=latent_dim)
-    decoder = MixedDecoder(input_dim, cond_dim, hidden_dims[0], latent_dim, 6)
-    checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
-    decoder.load_state_dict(checkpoint['decoder'])
-    decoder.eval()
-    return decoder
-
-def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_dim, cond_dim, hidden_dims, latent_dim):
-    decoder = load_trained_decoder(model_path, input_dim, cond_dim, hidden_dims, latent_dim)
-
-    # Mujoco 초기화
-    m = mujoco.MjModel.from_xml_path(xml_path)
-    d = mujoco.MjData(m)
-
-    with viewer.launch_passive(m, d) as v:
-        s_prev = s_0.unsqueeze(0)
-        d.qpos[0]=0.0
-        d.qpos[1]=0.0
-
-        while True:
-            z = torch.randn(1, latent_dim)
-            # print(z.size())
-            with torch.no_grad():
-                s_curr = decoder(z, s_prev)
-                
-            s_curr_np = s_curr[0].cpu().numpy()
-            
-            # s_curr_lpf = lpf(s_curr, s_prev, 0.5)
-            # s_curr_np = s_curr_lpf[0].cpu().numpy()            
-            
-            body_pos = s_curr_np[joint_pos_dim + joint_vel_dim 
-                                :joint_pos_dim + joint_vel_dim + base_pos_dim]
-            # body_quat = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim 
-            #                      :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim]
-            body_quat = rot6d2quat(torch.Tensor([s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim 
-                                 :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim]]))
-            # d.qpos[:3] = body_pos
-            d.qpos[2]=body_pos[2]
-            d.qpos[3:7] = body_quat
-            d.qpos[7:] = s_curr_np[0:joint_pos_dim]
-            
-            d.qvel[:3] = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim 
-                                  :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim + base_lin_vel_dim]
-            d.qvel[3:6] = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim + base_lin_vel_dim
-                                   :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim + base_lin_vel_dim + base_ang_vel_dim]
-            d.qvel[6:] = s_curr_np[joint_pos_dim : joint_pos_dim + joint_vel_dim]
-            
-            d.qpos[:2] += d.qvel[:2] * 1/30
-
-            mujoco.mj_step(m, d)
-            v.sync()
-
-            s_prev = s_curr
-            time.sleep(1/30)
-            
-
-        print("시각화 완료. ESC로 종료.")
-
 def main(argv, args):
-    FILENAME = args.file
-    folder_path = f"output/{FILENAME}"
-    
-    model_path = f"{folder_path}/cvae_model.pt"
-    cfg = np.load(f"{folder_path}/cfg.npz","rb")
+    global learning_rate
+    # ========= 학습 루프 =========
+    model = cVAE(input_dim, cond_dim, hidden_dims, latent_dim)
+    # optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.RAdam(model.parameters(), lr=learning_rate)
 
-    # xml_path = "assets/h1/h1.xml"
-    xml_path = "assets/g1/g1_29dof_rev_1_0.xml"
-    
-    
+    FILENAME=args.file
+    # motion = np.load("motion/motion_example.npz","rb")    
     motion = np.load(f"motion/{FILENAME}.npz","rb")
     s_t = torch.cat([torch.Tensor(motion["dof_positions"]),
                      torch.Tensor(motion["dof_velocities"]),
                      torch.flatten(torch.Tensor(motion["body_positions"][:,0,:]), 1),
                     #  torch.flatten(torch.Tensor(motion["body_rotations"][:,0,:]), 1),
-                     quat2rot6d(torch.flatten(torch.Tensor(motion["body_rotations"][:,0,:]), 1)), # includes conversion from quat to rot6d for continuity
+                     quat2rot6d(torch.Tensor(motion["body_rotations"][:,0,:])), # includes conversion from quat to rot6d for continuity
                      torch.flatten(torch.Tensor(motion["body_linear_velocities"][:,0,:]), 1),
                      torch.flatten(torch.Tensor(motion["body_angular_velocities"][:,0,:]), 1)], dim=1)
-    s_0 = s_t[0,:]
-    # s_0 = cfg["s_0"]
+    
+    #try reverse motion concatenation
+    # s_t = torch.cat([s_t,s_t.flip(0)],dim=0)
+    
+    s_t_1_data = torch.zeros_like(s_t)
+    s_t_1_data[0,:] = s_t[0,:]
+    s_t_1_data[1:,:] = s_t[:-1,:]
+    s_t_1_pred = torch.zeros_like(s_t)
 
-    visualize_in_mujoco_with_trained_decoder(
-        model_path=model_path,
-        xml_path=xml_path,
-        s_0=s_0,
-        input_dim=cfg["input_dim"],
-        cond_dim=cfg["cond_dim"],
-        hidden_dims=cfg["hidden_dims"],
-        latent_dim=cfg["latent_dim"],
-    )
+    dataset = torch.utils.data.TensorDataset(s_t, s_t_1_data, s_t_1_pred)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    # dataset = RandomStartSequenceDataset(s_t,s_t_1_data,s_t_1_pred,batch_size=batch_size)
+    # loader = torch.utils.data.DataLoader(dataset, batch_size=None)
+    for epoch in range(num_epochs):
+        total_loss = 0
+        recon_loss = 0
+        kl_div = 0
+        s_t_1_temp = []
+        
+        trans_start = 0.2
+        trans_end = 0.4
+        p = 1 - (epoch - trans_start* num_epochs) / ((trans_end - trans_start) * num_epochs)# s_t_1_data를 고를 확률
+        
+        #gain scheduling
+        learning_rate = lr_scheduler(lr_max, lr_min, epoch, num_epochs)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = learning_rate
+        scheduled_beta = beta_scheduler(beta, epoch, num_epochs/5)
+        
+        for x, y, z, start in loader:
+            optimizer.zero_grad()          
+            s_t_1 = torch.zeros_like(x)
+
+            rand = torch.rand(1)
+            if rand < p:
+                s_t_1 = y # select dataset
+            else:
+                s_t_1 = z  # select prediction
+
+            s_t_pred, mu, logvar = model(x, s_t_1)
+            # loss , recon_loss_1, kl_div_1= vae_loss(s_t_pred, x, mu, logvar, beta)            
+            loss , recon_loss_1, kl_div_1 = vae_loss(s_t_pred, x, mu, logvar, scheduled_beta)
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            recon_loss += recon_loss_1.item()
+            kl_div += kl_div_1.item()
+            
+            # s_t_1_pred[start:start+batch_size] = s_t_pred
+            
+            s_t_1_temp.append(s_t_pred)
+
+        s_t_1_temp =torch.cat(s_t_1_temp, dim=0)
+
+        s_t_1_save = torch.zeros_like(s_t_1_temp)
+        s_t_1_save[0,:] = s_t[0,:]
+        s_t_1_save[1:,:] = s_t_1_temp[:-1,:]
+        s_t_1_save = s_t_1_save.detach().clone()
+
+        dataset=torch.utils.data.TensorDataset(s_t, s_t_1_data, s_t_1_save)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        
+        # scheduler.step()
+        
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch : {epoch+1}/{num_epochs}, Total Loss: {total_loss:.4f}, Recon Loss : {recon_loss:.4f},  KL divergence :  {kl_div:.4f}, learning rate : {learning_rate:.4f}, beta : {scheduled_beta:.4f}")
+
+    # 학습 루프 끝에 모델 저장 추가
+    folder_path = get_unique_folder_name(f"output/{FILENAME}")
+    os.makedirs(folder_path)
+    model_path = f"{folder_path}/cvae_model.pt"
+
+    # 모델 저장
+    torch.save({
+        'encoder': model.encoder.state_dict(),
+        'decoder': model.decoder.state_dict()
+    }, model_path)
+    
+    # VAE structure 저장
+    np.savez(f"{folder_path}/cfg",
+             input_dim = input_dim,
+             cond_dim = cond_dim,
+             latent_dim = latent_dim,
+             hidden_dims = hidden_dims,
+             num_epochs = num_epochs,
+             batch_size = batch_size,
+             s_0 = s_t[0,:])
+    
+
+    print(f"모델이 '{model_path}'에 저장되었습니다.")
     
 if __name__ == "__main__":
     argv = sys.argv
