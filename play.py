@@ -51,8 +51,8 @@ def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_di
             #                      :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim]
             body_quat = rot6d2quat(torch.Tensor([s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim 
                                  :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim]]))
-            # d.qpos[:3] = body_pos
-            d.qpos[2]=body_pos[2]
+            d.qpos[:3] = body_pos
+            # d.qpos[2]=body_pos
             d.qpos[3:7] = body_quat
             d.qpos[7:] = s_curr_np[0:joint_pos_dim]
             
@@ -82,18 +82,8 @@ def main(argv, args):
 
     # xml_path = "assets/h1/h1.xml"
     xml_path = "assets/g1/g1_29dof_rev_1_0.xml"
-    
-    
-    motion = np.load(f"motion/{FILENAME}.npz","rb")
-    s_t = torch.cat([torch.Tensor(motion["dof_positions"]),
-                     torch.Tensor(motion["dof_velocities"]),
-                     torch.flatten(torch.Tensor(motion["body_positions"][:,0,:]), 1),
-                    #  torch.flatten(torch.Tensor(motion["body_rotations"][:,0,:]), 1),
-                     quat2rot6d(torch.flatten(torch.Tensor(motion["body_rotations"][:,0,:]), 1)), # includes conversion from quat to rot6d for continuity
-                     torch.flatten(torch.Tensor(motion["body_linear_velocities"][:,0,:]), 1),
-                     torch.flatten(torch.Tensor(motion["body_angular_velocities"][:,0,:]), 1)], dim=1)
-    s_0 = s_t[0,:]
-    # s_0 = cfg["s_0"]
+  
+    s_0 = torch.Tensor(cfg["s_0"])
 
     visualize_in_mujoco_with_trained_decoder(
         model_path=model_path,
