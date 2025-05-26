@@ -32,12 +32,21 @@ def main(argv, args):
         path = os.path.join(FOLDER,fname)
         # print("file list : ",path)
         motion = np.load(path,"rb")
+        
+        #base body rotation의 초기 yaw를 0으로 변환
+        q_base_init = torch.Tensor(motion["body_rotations"][0,0,:])
+        q_base_init_yaw0 = remove_yaw_torch(q_base_init)
+        
+        # print(f"q_base_init : {q_base_init}")
+        # print(f"q_base_init_yaw0 : {q_base_init_yaw0}")
+        q_base_trasform = compute_q4(q_base_init, q_base_init_yaw0, torch.Tensor(motion["body_rotations"][:,0,:]))
 
         s_t = torch.cat([torch.Tensor(motion["dof_positions"]),
                         torch.Tensor(motion["dof_velocities"]),
                         torch.Tensor(motion["body_positions"][:,0,2:3]),
                         #  torch.flatten(torch.Tensor(motion["body_rotations"][:,0,:]), 1),
-                        quat2rot6d(torch.Tensor(motion["body_rotations"][:,0,:])), # includes conversion from quat to rot6d for continuity
+                        # quat2rot6d(torch.Tensor(motion["body_rotations"][:,0,:])), # includes conversion from quat to rot6d for continuity
+                        quat2rot6d(q_base_trasform), # includes conversion from quat to rot6d for continuity
                         torch.flatten(torch.Tensor(motion["body_linear_velocities"][:,0,:]), 1),
                         torch.flatten(torch.Tensor(motion["body_angular_velocities"][:,0,:]), 1)], dim=1)
         
@@ -55,7 +64,6 @@ def main(argv, args):
     print(f"number of loaded motion files : {len(s_t_list)}")
     for i in range(len(s_t_list)):
         print(f"file {i} size : {s_t_list[i].size()}")
-#     motion = np.load(f"motion/{FILENAME}.npz","rb")
 
     #make output folder
     folder_path = get_unique_folder_name(f"output/{args.folder}")
