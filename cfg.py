@@ -33,4 +33,4 @@ batch_size = 4096
 learning_rate = 1e-3
 lr_max = 1e-3
 lr_min = 1e-7
-beta = 10.0
+beta = 0.2
