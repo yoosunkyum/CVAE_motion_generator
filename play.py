@@ -23,8 +23,12 @@ def load_trained_decoder(model_path, input_dim, cond_dim, hidden_dims, latent_di
     decoder.eval()
     return decoder
 
-def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_dim, cond_dim, hidden_dims, latent_dim):
-    decoder = load_trained_decoder(model_path, input_dim, cond_dim, hidden_dims, latent_dim)
+def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, cfg):#,s_0, input_dim, cond_dim, hidden_dims, latent_dim):
+    decoder = load_trained_decoder(model_path, 
+                                   input_dim=cfg["input_dim"], 
+                                   cond_dim=cfg["cond_dim"], 
+                                   hidden_dims=cfg["hidden_dims"], 
+                                   latent_dim=cfg["latent_dim"])
 
     # Mujoco 초기화
     m = mujoco.MjModel.from_xml_path(xml_path)
@@ -32,7 +36,9 @@ def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_di
     
     target_body = "pelvis"    
     body_id = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, target_body)
-
+    means = torch.Tensor(cfg["means"])
+    stds = torch.Tensor(cfg["stds"])
+    
     with viewer.launch_passive(m, d) as v:
         v.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
         v.cam.trackbodyid = body_id
@@ -40,7 +46,17 @@ def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_di
         v.cam.elevation = -30
         v.cam.azimuth = 90
         
-        s_prev = s_0.unsqueeze(0)
+        s_prev = torch.Tensor(cfg["s_0"]).unsqueeze(0)
+        print("s_prev[:joint_pos_dim] : ",s_prev[0,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim].size())
+        print("means[:joint_pos_dim] : ",means.size())
+        print("stds[:joint_pos_dim] : ",stds.size())
+        
+        # s_prev[0,:joint_pos_dim] = means[:joint_pos_dim] + s_prev[0,:joint_pos_dim] * stds[:joint_pos_dim]
+        # s_prev[0,joint_pos_dim:joint_pos_dim+joint_vel_dim] = means[joint_pos_dim:joint_pos_dim+joint_vel_dim] + s_prev[0,joint_pos_dim:joint_pos_dim+joint_vel_dim] * stds[joint_pos_dim:joint_pos_dim+joint_vel_dim]
+        # s_prev[0,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim] = means[joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim] + s_prev[0,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim] * stds[joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim]
+        # s_prev[0,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim] = means[joint_pos_dim+joint_vel_dim+base_pos_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_lin_vel_dim] + s_prev[0,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim] * stds[joint_pos_dim+joint_vel_dim+base_pos_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_lin_vel_dim]
+        # s_prev[0,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim+base_ang_vel_dim] = means[joint_pos_dim+joint_vel_dim+base_pos_dim+base_lin_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_lin_vel_dim+base_ang_vel_dim] + s_prev[0,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim+base_ang_vel_dim] * stds[joint_pos_dim+joint_vel_dim+base_pos_dim+base_lin_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_lin_vel_dim+base_ang_vel_dim]
+        s_prev[0,:-base_rot_dim] = means + s_prev[0,:-base_rot_dim] * stds
         d.qpos[0]=0.0
         d.qpos[1]=0.0
         # i = 0
@@ -52,7 +68,7 @@ def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_di
             # print(z.size())
             with torch.no_grad():
                 s_curr = decoder(z, s_prev)
-                
+            s_curr[0,:-base_rot_dim] = means + s_curr[0,:-base_rot_dim] * stds
             s_curr_np = s_curr[0].cpu().numpy()
             
             # s_curr_lpf = lpf(s_curr, s_prev, 0.5)
@@ -62,19 +78,18 @@ def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_di
                                 :joint_pos_dim + joint_vel_dim + base_pos_dim]
             # body_quat = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim 
             #                      :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim]
-            body_quat = rot6d2quat(torch.Tensor([s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim 
-                                 :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim]]))
+            body_quat = rot6d2quat(torch.Tensor([s_curr_np[-base_rot_dim:]]))
             # d.qpos[:3] = body_pos
-            d.qpos[2]=body_pos
+            d.qpos[2]= body_pos
 
             d.qpos[3:7] = body_quat
             
-            d.qpos[7:] = s_curr_np[0:joint_pos_dim]
+            d.qpos[7:] = s_curr_np[:joint_pos_dim]
             
-            d.qvel[:3] = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim 
-                                  :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim + base_lin_vel_dim]
-            d.qvel[3:6] = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim + base_lin_vel_dim
-                                   :joint_pos_dim + joint_vel_dim + base_pos_dim + base_rot_dim + base_lin_vel_dim + base_ang_vel_dim]
+            d.qvel[:3] = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim 
+                                  :joint_pos_dim + joint_vel_dim + base_pos_dim + base_lin_vel_dim]
+            d.qvel[3:6] = s_curr_np[joint_pos_dim + joint_vel_dim + base_pos_dim + base_lin_vel_dim
+                                   :joint_pos_dim + joint_vel_dim + base_pos_dim + base_lin_vel_dim + base_ang_vel_dim]
             d.qvel[6:] = s_curr_np[joint_pos_dim : joint_pos_dim + joint_vel_dim]
             
             d.qpos[:2] += d.qvel[:2] * 1/30
@@ -83,7 +98,6 @@ def visualize_in_mujoco_with_trained_decoder(model_path, xml_path, s_0, input_di
 
             mujoco.mj_step(m, d)
             v.sync()
-
             s_prev = s_curr
             time.sleep(1/30)
             
@@ -105,11 +119,12 @@ def main(argv, args):
     visualize_in_mujoco_with_trained_decoder(
         model_path=model_path,
         xml_path=xml_path,
-        s_0=s_0,
-        input_dim=cfg["input_dim"],
-        cond_dim=cfg["cond_dim"],
-        hidden_dims=cfg["hidden_dims"],
-        latent_dim=cfg["latent_dim"],
+        cfg=cfg,
+        # s_0=s_0,
+        # input_dim=cfg["input_dim"],
+        # cond_dim=cfg["cond_dim"],
+        # hidden_dims=cfg["hidden_dims"],
+        # latent_dim=cfg["latent_dim"],
     )
     
 if __name__ == "__main__":
