@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import os
+from cfg import *
 
 def lr_scheduler(lr_max, lr_min, epoch, period):
     return lr_min + 0.5 * (lr_max - lr_min) * (1 + np.cos(epoch/period * np.pi))
@@ -177,3 +178,40 @@ def integrate_quaternion(q0, omega, dt):
     q1 = q1 / q1.norm(dim=-1, keepdim=True)
     return q1
 
+
+
+def data_normalization(x : torch.Tensor):
+    x_mean = x.mean(dim=0)
+    x_std = x.std(dim=0)
+    # print("x_std size : ",x_std.size())
+    for i in range(x_std.size()[0]):
+        if (x_std[i] == 0.0):
+            x_std[i] = 1.0 
+    x_norm = (x - x_mean)/x_std
+    return x_norm, x_mean, x_std
+    # dof_pos_mean = s_t_list[:,:joint_pos_dim].mean(dim=0)
+    # dof_pos_std = s_t_list[:,:joint_pos_dim].std(dim=0)
+    # s_t_list[:,:joint_pos_dim] = (s_t_list[:,:joint_pos_dim] - dof_pos_mean)/dof_pos_std
+    # s_t_1_data_list[:,:joint_pos_dim] = (s_t_1_data_list[:,:joint_pos_dim] - dof_pos_mean)/dof_pos_std
+    # s_t_1_pred_list[:,:joint_pos_dim] = (s_t_1_pred_list[:,:joint_pos_dim] - dof_pos_mean)/dof_pos_std
+    
+    # dof_vel_mean = s_t_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim].mean(dim=0)
+    # dof_vel_std = s_t_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim].std(dim=0)
+    # s_t_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim] = (s_t_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim] - dof_vel_mean)/dof_vel_std
+    # s_t_1_data_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim] = (s_t_1_data_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim] - dof_vel_mean)/dof_vel_std
+    # s_t_1_pred_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim] = (s_t_1_pred_list[:,joint_pos_dim:joint_pos_dim+joint_vel_dim] - dof_vel_mean)/dof_vel_std
+    
+    # body_pos_mean = s_t_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim].mean(dim=0)
+    # body_pos_std = s_t_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim].std(dim=0)
+    # s_t_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim] = (s_t_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim]-body_pos_mean)/body_pos_std
+    # s_t_1_data_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim] = (s_t_1_data_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim]-body_pos_mean)/body_pos_std
+    # s_t_1_pred_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim] = (s_t_1_pred_list[:,joint_pos_dim+joint_vel_dim:joint_pos_dim+joint_vel_dim+base_pos_dim]-body_pos_mean)/body_pos_std
+
+    # body_lin_vel_mean = s_t_list[:,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim].mean(dim=0)
+    # body_lin_vel_std = s_t_list[:,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim].std(dim=0)
+    # s_t_list[:,joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim:joint_pos_dim+joint_vel_dim+base_pos_dim+base_rot_dim+base_lin_vel_dim] =
+
+
+
+
+# def data_denormalization():
